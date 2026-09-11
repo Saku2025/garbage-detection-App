@@ -75,7 +75,9 @@ class UpdateService {
 
         final name = asset['name']?.toString() ?? '';
 
-        if (name.toLowerCase().endsWith('.apk')) {
+        final expectedName = 'garbage_detection_v$latestVersion.apk';
+
+        if (name.toLowerCase() == expectedName.toLowerCase()) {
           final url = asset['browser_download_url']?.toString();
 
           if (url != null && url.isNotEmpty) {
