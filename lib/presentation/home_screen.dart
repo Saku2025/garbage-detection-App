@@ -387,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // ------------------------------------------------
 
               Text(
-                'Capture & Locate',
+                'Capture & Locate V1',
                 style: TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
