@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/storage_service.dart';
+import '../services/update_service.dart';
 import 'camera_screen.dart';
 import 'gallery_screen.dart';
 import 'login_screen.dart';
@@ -35,6 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadUserDetails();
+
+    // Check for a newer GitHub release after the home screen opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForUpdate();
+    });
   }
 
   // ============================================================
@@ -387,7 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // ------------------------------------------------
 
               Text(
-                'Capture & Locate V1',
+                'Capture & Locate',
                 style: TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
@@ -739,6 +745,147 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // #update Method
+  Future<void> _checkForUpdate() async {
+    final updateInfo = await UpdateService.checkForUpdate();
+
+    if (!mounted || updateInfo == null) return;
+
+    if (!updateInfo.updateAvailable) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+
+        return AlertDialog(
+          icon: Icon(
+            Icons.system_update_outlined,
+            size: 42,
+            color: colorScheme.primary,
+          ),
+          title: const Text(
+            'New Update Available',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'A new version of Garbage Detection is available.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Current',
+                      style: TextStyle(color: colorScheme.onPrimaryContainer),
+                    ),
+                    Text(
+                      'v${updateInfo.currentVersion}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'New version',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                    Text(
+                      'v${updateInfo.latestVersion}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (updateInfo.releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'What’s new',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    updateInfo.releaseNotes,
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Later'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                // APK download/install will be added next.
+                Navigator.pop(dialogContext);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Update download will be added in the next step.',
+                    ),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Update Now'),
+            ),
+          ],
+        );
+      },
     );
   }
 }
