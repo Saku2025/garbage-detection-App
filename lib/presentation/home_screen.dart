@@ -12,6 +12,8 @@ import 'camera_screen.dart';
 import 'gallery_screen.dart';
 import 'login_screen.dart';
 
+import 'package:open_filex/open_filex.dart';
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -867,18 +869,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Later'),
             ),
             FilledButton.icon(
-              onPressed: () {
-                // APK download/install will be added next.
+              onPressed: () async {
                 Navigator.pop(dialogContext);
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Update download will be added in the next step.',
-                    ),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                await _downloadAndInstallUpdate(updateInfo);
               },
               icon: const Icon(Icons.download_outlined),
               label: const Text('Update Now'),
@@ -887,5 +881,101 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
+  }
+
+  Future<void> _downloadAndInstallUpdate(UpdateInfo updateInfo) async {
+    double progress = 0.0;
+    StateSetter? dialogSetState;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            dialogSetState = setState;
+
+            return AlertDialog(
+              icon: const Icon(Icons.download_outlined, size: 40),
+              title: const Text(
+                'Downloading Update',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Downloading v${updateInfo.latestVersion}...',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+
+                  LinearProgressIndicator(
+                    value: progress > 0 ? progress : null,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Text(
+                    progress > 0
+                        ? '${(progress * 100).toStringAsFixed(0)}%'
+                        : 'Starting download...',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    try {
+      final apkFile = await UpdateService.downloadApk(
+        updateInfo.downloadUrl,
+        onProgress: (received, total) {
+          if (total > 0 && mounted) {
+            progress = received / total;
+
+            dialogSetState?.call(() {});
+          }
+        },
+      );
+
+      if (!mounted) return;
+
+      // Close download dialog.
+      Navigator.of(context).pop();
+
+      // Open Android APK installer.
+      final result = await OpenFilex.open(
+        apkFile.path,
+        type: 'application/vnd.android.package-archive',
+      );
+
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open installer: ${result.message}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      // Close download dialog.
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Update failed: ${e.toString().replaceFirst('Exception: ', '')}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }

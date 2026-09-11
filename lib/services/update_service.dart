@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 class UpdateInfo {
   final bool updateAvailable;
@@ -29,19 +31,18 @@ class UpdateService {
 
   static Future<UpdateInfo?> checkForUpdate() async {
     try {
-      // ----------------------------------------------------------
-      // GET CURRENT APP VERSION
-      // ----------------------------------------------------------
       final packageInfo = await PackageInfo.fromPlatform();
 
-      final currentVersion = packageInfo.version;
+      // Version actually installed on the phone.
+      final currentVersion = packageInfo.version.trim();
 
-      // ----------------------------------------------------------
-      // GET LATEST GITHUB RELEASE
-      // ----------------------------------------------------------
+      // Get latest GitHub release.
       final response = await http.get(
         Uri.parse(_latestReleaseUrl),
-        headers: const {'Accept': 'application/vnd.github+json'},
+        headers: const {
+          'Accept': 'application/vnd.github+json',
+          'Cache-Control': 'no-cache',
+        },
       );
 
       if (response.statusCode != 200) {
@@ -50,8 +51,6 @@ class UpdateService {
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-      // Example GitHub tag:
-      // v1.1.0
       final tagName = data['tag_name']?.toString() ?? '';
 
       if (tagName.isEmpty) {
@@ -60,9 +59,7 @@ class UpdateService {
 
       final latestVersion = _cleanVersion(tagName);
 
-      // ----------------------------------------------------------
-      // FIND APK
-      // ----------------------------------------------------------
+      // Find APK.
       final assets = data['assets'];
 
       if (assets is! List) {
@@ -79,8 +76,12 @@ class UpdateService {
         final name = asset['name']?.toString() ?? '';
 
         if (name.toLowerCase().endsWith('.apk')) {
-          downloadUrl = asset['browser_download_url']?.toString();
-          break;
+          final url = asset['browser_download_url']?.toString();
+
+          if (url != null && url.isNotEmpty) {
+            downloadUrl = url;
+            break;
+          }
         }
       }
 
@@ -88,15 +89,11 @@ class UpdateService {
         return null;
       }
 
-      // ----------------------------------------------------------
-      // RELEASE NOTES
-      // ----------------------------------------------------------
       final releaseNotes = data['body']?.toString().trim() ?? '';
 
-      // ----------------------------------------------------------
-      // COMPARE VERSIONS
-      // ----------------------------------------------------------
       final updateAvailable = _isNewerVersion(latestVersion, currentVersion);
+
+      // Debug information.
 
       return UpdateInfo(
         updateAvailable: updateAvailable,
@@ -105,23 +102,14 @@ class UpdateService {
         downloadUrl: downloadUrl,
         releaseNotes: releaseNotes,
       );
-    } catch (_) {
-      // Update checking should NEVER crash the app.
+    } catch (e) {
       return null;
     }
   }
 
-  // ============================================================
-  // REMOVE "v" FROM VERSION
-  // ============================================================
-
   static String _cleanVersion(String version) {
     return version.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), '');
   }
-
-  // ============================================================
-  // VERSION COMPARISON
-  // ============================================================
 
   static bool _isNewerVersion(String latest, String current) {
     final latestParts = _versionParts(latest);
@@ -142,7 +130,6 @@ class UpdateService {
 
   static List<int> _versionParts(String version) {
     final cleaned = _cleanVersion(version);
-
     final parts = cleaned.split('.');
 
     return List<int>.generate(3, (index) {
@@ -152,5 +139,61 @@ class UpdateService {
 
       return int.tryParse(parts[index].replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
     });
+  }
+
+  static Future<File> downloadApk(
+    String downloadUrl, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final client = http.Client();
+
+    try {
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+
+      request.headers['Cache-Control'] = 'no-cache';
+
+      final response = await client.send(request);
+
+      if (response.statusCode != 200) {
+        throw Exception('APK download failed: ${response.statusCode}');
+      }
+
+      final directory = await getTemporaryDirectory();
+
+      final file = File('${directory.path}/garbage_detection_update.apk');
+
+      if (await file.exists()) {
+        await file.delete();
+      }
+
+      final sink = file.openWrite();
+
+      int received = 0;
+      final total = response.contentLength ?? -1;
+
+      await for (final chunk in response.stream) {
+        received += chunk.length;
+
+        sink.add(chunk);
+
+        onProgress?.call(received, total);
+      }
+
+      await sink.close();
+
+      if (!await file.exists()) {
+        throw Exception('Downloaded APK file was not found.');
+      }
+
+      final fileSize = await file.length();
+
+      if (fileSize == 0) {
+        throw Exception('Downloaded APK is empty.');
+      }
+
+      return file;
+    } finally {
+      client.close();
+    }
   }
 }
