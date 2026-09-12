@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/storage_service.dart';
 import '../services/update_service.dart';
+import '../services/theme_service.dart';
 import 'camera_screen.dart';
 import 'gallery_screen.dart';
 import 'login_screen.dart';
@@ -26,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   double? latitude;
   double? longitude;
-
+  String? currentArea;
   bool isLoadingLocation = false;
 
   String _userName = '';
@@ -196,19 +197,32 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // Get GPS coordinates
       final position = await locationService.getCurrentLocation();
+
+      if (!mounted) return;
+
+      // Get area name from GPS coordinates
+      final area = await locationService.getAreaName(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
 
       if (!mounted) return;
 
       setState(() {
         latitude = position.latitude;
         longitude = position.longitude;
+        currentArea = area;
       });
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } finally {
       if (mounted) {
@@ -245,12 +259,35 @@ class _HomeScreenState extends State<HomeScreen> {
     final RenderBox button = context.findRenderObject() as RenderBox;
     final Offset position = button.localToGlobal(Offset.zero);
 
-    await showMenu<String>(
+    final value = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(12, position.dy + 70, 12, 0),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 8,
       items: [
+        PopupMenuItem<String>(
+          value: 'appearance',
+          child: Row(
+            children: [
+              Icon(
+                Icons.palette_outlined,
+                color: colorScheme.primary,
+                size: 21,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Appearance',
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const PopupMenuDivider(),
+
         PopupMenuItem<String>(
           enabled: false,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -306,11 +343,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
-    ).then((value) {
-      if (value == 'logout') {
-        logout();
-      }
-    });
+    );
+
+    if (!mounted) return;
+
+    if (value == 'appearance') {
+      await _showThemeSelector();
+    } else if (value == 'logout') {
+      await logout();
+    }
   }
 
   // ============================================================
@@ -631,6 +672,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         child: Column(
                           children: [
+                            _coordinateRow(
+                              'Area',
+                              currentArea ?? 'Unknown Area',
+                            ),
+
+                            const SizedBox(height: 12),
+
                             _coordinateRow(
                               'Latitude',
                               latitude!.toStringAsFixed(6),
@@ -976,6 +1024,50 @@ class _HomeScreenState extends State<HomeScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  Future<void> _showThemeSelector() async {
+    final currentTheme = ThemeService.themeMode.value;
+
+    final selectedTheme = await showDialog<ThemeMode>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Appearance'),
+          content: RadioGroup<ThemeMode>(
+            groupValue: currentTheme,
+            onChanged: (value) {
+              Navigator.pop(dialogContext, value);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                RadioListTile<ThemeMode>(
+                  value: ThemeMode.system,
+                  title: Text('System'),
+                  subtitle: Text('Follow device setting'),
+                  secondary: Icon(Icons.brightness_auto_outlined),
+                ),
+                RadioListTile<ThemeMode>(
+                  value: ThemeMode.light,
+                  title: Text('Light'),
+                  secondary: Icon(Icons.light_mode_outlined),
+                ),
+                RadioListTile<ThemeMode>(
+                  value: ThemeMode.dark,
+                  title: Text('Dark'),
+                  secondary: Icon(Icons.dark_mode_outlined),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedTheme != null) {
+      await ThemeService.setTheme(selectedTheme);
     }
   }
 }
