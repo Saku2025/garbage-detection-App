@@ -1,102 +1,45 @@
 import 'dart:io';
 
-import 'package:hive_flutter/hive_flutter.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/garbage_record.dart';
 
 class StorageService {
-  static const String _boxName = 'garbage_records';
+  // ============================================================
+  // CONSTANTS
+  // ============================================================
+
   static const String _bucketName = 'garbage-images';
+
+  // Signed URL validity: 1 hour
+  static const int _signedUrlExpirySeconds = 60 * 60;
 
   static final SupabaseClient _supabase = Supabase.instance.client;
 
-  // ------------------------------------------------------------
-  // OLD LOCAL STORAGE
-  // ------------------------------------------------------------
+  // ============================================================
+  // GET CURRENT USER
+  // ============================================================
 
-  static Future<void> init() async {
-    await Hive.initFlutter();
-    await Hive.openBox(_boxName);
-  }
-
-  static Future<String> saveImage(File imageFile) async {
-    final directory = await getApplicationDocumentsDirectory();
-
-    final imageDirectory = Directory('${directory.path}/garbage_images');
-
-    if (!await imageDirectory.exists()) {
-      await imageDirectory.create(recursive: true);
-    }
-
-    final fileName = 'garbage_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-    final savedImage = await imageFile.copy('${imageDirectory.path}/$fileName');
-
-    return savedImage.path;
-  }
-
-  static Future<void> saveRecord(GarbageRecord record) async {
-    final box = Hive.box(_boxName);
-
-    await box.put(record.id, record.toMap());
-  }
-
-  static List<GarbageRecord> getAllRecords() {
-    final box = Hive.box(_boxName);
-
-    final records = box.values
-        .map((data) => GarbageRecord.fromMap(data))
-        .toList();
-
-    records.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-
-    return records;
-  }
-
-  static Future<void> deleteRecord(String id) async {
-    final box = Hive.box(_boxName);
-
-    final data = box.get(id);
-
-    if (data != null) {
-      final record = GarbageRecord.fromMap(data);
-
-      final imageFile = File(record.imagePath);
-
-      if (await imageFile.exists()) {
-        await imageFile.delete();
-      }
-    }
-
-    await box.delete(id);
-  }
-
-  // ------------------------------------------------------------
-  // SUPABASE STORAGE
-  // ------------------------------------------------------------
-
-  /// Upload an image to Supabase Storage.
-  ///
-  /// Path:
-  ///
-  /// garbage-images/
-  ///     user_id/
-  ///         image_id.jpg
-  ///
-  static Future<String> uploadImage(File imageFile) async {
+  static User _getCurrentUser() {
     final user = _supabase.auth.currentUser;
 
     if (user == null) {
       throw Exception('User is not logged in.');
     }
 
-    final userId = user.id;
+    return user;
+  }
+
+  // ============================================================
+  // UPLOAD ONE IMAGE
+  // ============================================================
+
+  static Future<String> uploadImage(File imageFile) async {
+    final user = _getCurrentUser();
 
     final fileName = 'garbage_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    final filePath = '$userId/$fileName';
+    final filePath = '${user.id}/$fileName';
 
     await _supabase.storage
         .from(_bucketName)
@@ -112,70 +55,249 @@ class StorageService {
     return filePath;
   }
 
-  // ------------------------------------------------------------
-  // SAVE CLOUD RECORD
-  // ------------------------------------------------------------
+  // ============================================================
+  // CREATE GARBAGE REPORT
+  // ============================================================
 
-  /// Saves image information, GPS coordinates, area and time.
-  static Future<void> saveCloudRecord({
-    required String id,
-    required String imagePath,
+  static Future<void> createGarbageReport({
+    required String recordId,
+    required List<File> images,
     required double latitude,
     required double longitude,
     required String area,
-    required DateTime timestamp,
+    required String pinCode,
+    required String roadName,
+    required String description,
   }) async {
-    final user = _supabase.auth.currentUser;
+    final user = _getCurrentUser();
 
-    if (user == null) {
-      throw Exception('User is not logged in.');
+    // ----------------------------------------------------------
+    // Validate images
+    // ----------------------------------------------------------
+
+    if (images.isEmpty) {
+      throw Exception('At least one image is required.');
     }
 
-    await _supabase.from('garbage_records').insert({
-      'id': id,
-      'user_id': user.id,
-      'image_path': imagePath,
-      'latitude': latitude,
-      'longitude': longitude,
-      'area': area,
-      'timestamp': timestamp.toUtc().toIso8601String(),
-    });
+    if (images.length > 5) {
+      throw Exception('Maximum 5 images are allowed.');
+    }
+
+    final uploadedPaths = <String>[];
+
+    try {
+      // ========================================================
+      // 1. CREATE GARBAGE RECORD
+      // ========================================================
+
+      await _supabase.from('garbage_records').insert({
+        'id': recordId,
+        'user_id': user.id,
+        'latitude': latitude,
+        'longitude': longitude,
+        'area': area,
+        'pin_code': pinCode,
+        'road_name': roadName,
+        'description': description,
+        'timestamp': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      // ========================================================
+      // 2. UPLOAD ALL IMAGES
+      // ========================================================
+
+      for (int i = 0; i < images.length; i++) {
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+
+        final imagePath = '${user.id}/$recordId/$fileName';
+
+        // ------------------------------------------------------
+        // Upload image to Supabase Storage
+        // ------------------------------------------------------
+
+        await _supabase.storage
+            .from(_bucketName)
+            .upload(
+              imagePath,
+              images[i],
+              fileOptions: const FileOptions(
+                contentType: 'image/jpeg',
+                upsert: false,
+              ),
+            );
+
+        uploadedPaths.add(imagePath);
+
+        // ------------------------------------------------------
+        // Store image information in garbage_images
+        // ------------------------------------------------------
+
+        await _supabase.from('garbage_images').insert({
+          'garbage_record_id': recordId,
+          'image_path': imagePath,
+          'photo_order': i + 1,
+        });
+      }
+    } catch (e) {
+      // ========================================================
+      // ROLLBACK
+      // ========================================================
+
+      // --------------------------------------------------------
+      // Remove uploaded images from Storage
+      // --------------------------------------------------------
+
+      if (uploadedPaths.isNotEmpty) {
+        try {
+          await _supabase.storage.from(_bucketName).remove(uploadedPaths);
+        } catch (_) {
+          // Ignore cleanup error
+        }
+      }
+
+      // --------------------------------------------------------
+      // Remove garbage_images rows
+      // --------------------------------------------------------
+
+      try {
+        await _supabase
+            .from('garbage_images')
+            .delete()
+            .eq('garbage_record_id', recordId);
+      } catch (_) {
+        // Ignore cleanup error
+      }
+
+      // --------------------------------------------------------
+      // Remove garbage_records row
+      // --------------------------------------------------------
+
+      try {
+        await _supabase
+            .from('garbage_records')
+            .delete()
+            .eq('id', recordId)
+            .eq('user_id', user.id);
+      } catch (_) {
+        // Ignore cleanup error
+      }
+
+      rethrow;
+    }
   }
 
-  // ------------------------------------------------------------
-  // GET CLOUD RECORDS
-  // ------------------------------------------------------------
+  // ============================================================
+  // GET ALL CLOUD RECORDS
+  // ============================================================
 
   static Future<List<GarbageRecord>> getCloudRecords() async {
-    final user = _supabase.auth.currentUser;
+    final user = _getCurrentUser();
 
-    if (user == null) {
-      throw Exception('User is not logged in.');
-    }
+    // ==========================================================
+    // GET RECORDS + ALL IMAGES
+    // ==========================================================
 
     final response = await _supabase
         .from('garbage_records')
-        .select()
+        .select('''
+          id,
+          user_id,
+          latitude,
+          longitude,
+          area,
+          pin_code,
+          road_name,
+          description,
+          timestamp,
+          garbage_images (
+            id,
+            image_path,
+            photo_order,
+            created_at
+          )
+        ''')
         .eq('user_id', user.id)
         .order('timestamp', ascending: false);
 
     final List<GarbageRecord> records = [];
 
-    for (final data in response) {
-      final imagePath = data['image_path'] as String;
+    // ==========================================================
+    // PROCESS EACH GARBAGE RECORD
+    // ==========================================================
 
-      final signedUrl = await _supabase.storage
-          .from(_bucketName)
-          .createSignedUrl(imagePath, 60 * 60);
+    for (final data in response) {
+      // --------------------------------------------------------
+      // Get image rows
+      // --------------------------------------------------------
+
+      final imageRows = List<dynamic>.from(
+        (data['garbage_images'] as List<dynamic>?) ?? [],
+      );
+
+      // --------------------------------------------------------
+      // Sort images according to photo_order
+      // --------------------------------------------------------
+
+      imageRows.sort((a, b) {
+        final orderA = (a['photo_order'] as num?)?.toInt() ?? 0;
+
+        final orderB = (b['photo_order'] as num?)?.toInt() ?? 0;
+
+        return orderA.compareTo(orderB);
+      });
+
+      // --------------------------------------------------------
+      // Create signed URLs
+      // --------------------------------------------------------
+
+      final List<String> imageUrls = [];
+
+      for (final imageRow in imageRows) {
+        final imagePath = imageRow['image_path']?.toString();
+
+        if (imagePath == null || imagePath.isEmpty) {
+          continue;
+        }
+
+        try {
+          final signedUrl = await _supabase.storage
+              .from(_bucketName)
+              .createSignedUrl(imagePath, _signedUrlExpirySeconds);
+
+          imageUrls.add(signedUrl);
+        } catch (_) {
+          // Skip invalid/deleted image
+        }
+      }
+
+      // --------------------------------------------------------
+      // Create GarbageRecord object
+      // --------------------------------------------------------
 
       records.add(
         GarbageRecord(
-          id: data['id'] as String,
-          imagePath: signedUrl,
+          id: data['id'].toString(),
+
+          userId: data['user_id'].toString(),
+
           latitude: (data['latitude'] as num).toDouble(),
+
           longitude: (data['longitude'] as num).toDouble(),
-          area: data['area']?.toString() ?? 'Unknown Area',
-          timestamp: DateTime.parse(data['timestamp'] as String),
+
+          area: data['area']?.toString() ?? '',
+
+          pinCode: data['pin_code']?.toString() ?? '',
+
+          roadName: data['road_name']?.toString() ?? '',
+
+          description: data['description']?.toString() ?? '',
+
+          timestamp: DateTime.parse(data['timestamp'].toString()),
+
+          // IMPORTANT:
+          // All photos belonging to the same garbage record
+          // are stored inside this single list.
+          imagePaths: imageUrls,
         ),
       );
     }
@@ -183,39 +305,116 @@ class StorageService {
     return records;
   }
 
-  // ------------------------------------------------------------
-  // DELETE CLOUD RECORD
-  // ------------------------------------------------------------
+  // ============================================================
+  // DELETE ONE PHOTO
+  // ============================================================
+  //
+  // This deletes ONLY the selected photo.
+  //
+  // The other photos belonging to the same garbage report
+  // remain untouched.
+  //
+  // ============================================================
 
-  static Future<void> deleteCloudRecord(String id) async {
-    final user = _supabase.auth.currentUser;
+  static Future<void> deleteCloudImage({
+    required String recordId,
+    required String imagePath,
+  }) async {
+    final user = _getCurrentUser();
 
-    if (user == null) {
-      throw Exception('User is not logged in.');
+    if (imagePath.isEmpty) {
+      throw Exception('Invalid image path.');
     }
 
-    // Get image path before deleting database record.
-    final response = await _supabase
-        .from('garbage_records')
-        .select('image_path')
-        .eq('id', id)
-        .eq('user_id', user.id)
-        .maybeSingle();
+    // ==========================================================
+    // 1. DELETE IMAGE FROM STORAGE
+    // ==========================================================
 
-    if (response == null) {
-      throw Exception('Photo record not found.');
-    }
-
-    final imagePath = response['image_path'] as String;
-
-    // Delete image from Supabase Storage.
     await _supabase.storage.from(_bucketName).remove([imagePath]);
 
-    // Delete database record.
+    // ==========================================================
+    // 2. DELETE IMAGE DATABASE ROW
+    // ==========================================================
+
+    await _supabase
+        .from('garbage_images')
+        .delete()
+        .eq('garbage_record_id', recordId)
+        .eq('image_path', imagePath);
+
+    // ==========================================================
+    // 3. CHECK IF ANY PHOTOS REMAIN
+    // ==========================================================
+
+    final remainingImages = await _supabase
+        .from('garbage_images')
+        .select('id')
+        .eq('garbage_record_id', recordId);
+
+    // ==========================================================
+    // 4. IF NO PHOTOS REMAIN, DELETE THE WHOLE RECORD
+    // ==========================================================
+
+    if (remainingImages.isEmpty) {
+      await _supabase
+          .from('garbage_records')
+          .delete()
+          .eq('id', recordId)
+          .eq('user_id', user.id);
+    }
+  }
+
+  // ============================================================
+  // DELETE COMPLETE CLOUD RECORD
+  // ============================================================
+
+  static Future<void> deleteCloudRecord(String recordId) async {
+    final user = _getCurrentUser();
+
+    // ==========================================================
+    // 1. GET ALL IMAGE PATHS
+    // ==========================================================
+
+    final response = await _supabase
+        .from('garbage_images')
+        .select('image_path')
+        .eq('garbage_record_id', recordId);
+
+    final List<String> imagePaths = [];
+
+    for (final row in response) {
+      final path = row['image_path']?.toString();
+
+      if (path != null && path.isNotEmpty) {
+        imagePaths.add(path);
+      }
+    }
+
+    // ==========================================================
+    // 2. DELETE ALL IMAGES FROM STORAGE
+    // ==========================================================
+
+    if (imagePaths.isNotEmpty) {
+      await _supabase.storage.from(_bucketName).remove(imagePaths);
+    }
+
+    // ==========================================================
+    // 3. DELETE ALL garbage_images ROWS
+    // ==========================================================
+
+    await _supabase
+        .from('garbage_images')
+        .delete()
+        .eq('garbage_record_id', recordId);
+
+    // ==========================================================
+    // 4. DELETE garbage_records ROW
+    // ==========================================================
+
     await _supabase
         .from('garbage_records')
         .delete()
-        .eq('id', id)
+        .eq('id', recordId)
         .eq('user_id', user.id);
   }
 }

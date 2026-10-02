@@ -126,10 +126,6 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  // =========================
-  // CAMERA VIEW
-  // =========================
-
   Widget buildCameraView() {
     return Stack(
       children: [
@@ -148,7 +144,6 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
         ),
 
-        // Top bar
         Positioned(
           top: 10,
           left: 10,
@@ -161,7 +156,6 @@ class _CameraScreenState extends State<CameraScreen> {
                   Navigator.pop(context);
                 },
               ),
-
               const Expanded(
                 child: Center(
                   child: Text(
@@ -174,13 +168,11 @@ class _CameraScreenState extends State<CameraScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(width: 48),
             ],
           ),
         ),
 
-        // Capture button
         Positioned(
           bottom: 30,
           left: 0,
@@ -209,11 +201,11 @@ class _CameraScreenState extends State<CameraScreen> {
           ),
         ),
 
-        Positioned(
+        const Positioned(
           bottom: 125,
           left: 0,
           right: 0,
-          child: const Center(
+          child: Center(
             child: Text(
               'Tap to capture',
               style: TextStyle(color: Colors.white, fontSize: 14),
@@ -224,19 +216,13 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  // =========================
-  // IMAGE PREVIEW
-  // =========================
-
   Widget buildImagePreview() {
     return Stack(
       children: [
-        // Captured image
         Positioned.fill(
           child: Image.file(File(capturedImage!.path), fit: BoxFit.contain),
         ),
 
-        // Top bar
         Positioned(
           top: 10,
           left: 10,
@@ -249,7 +235,6 @@ class _CameraScreenState extends State<CameraScreen> {
                   Navigator.pop(context);
                 },
               ),
-
               const Expanded(
                 child: Center(
                   child: Text(
@@ -262,13 +247,11 @@ class _CameraScreenState extends State<CameraScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(width: 48),
             ],
           ),
         ),
 
-        // Bottom buttons
         Positioned(
           bottom: 30,
           left: 20,

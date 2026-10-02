@@ -35,7 +35,8 @@ dependencies:
 
   flutter_native_splash: ^2.4.8
   flutter_dotenv: ^6.0.1
-
+  firebase_core: ^4.14.0
+  firebase_auth: ^6.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -57,7 +58,7 @@ flutter:
     - .env
     - assets/icon/app_icon.png
     - assets/icon/app_icon_ios.png
-    - assets/icon/app_icon_android_padded.png
+    - assets/icon/app_icon_android.png
 
 flutter_native_splash:
   color: "#F5F8F5"
@@ -73,4 +74,4 @@ flutter_native_splash:
   android_12:
     color: "#F5F8F5"
     color_dark: "#0F1712"
-    image: assets/icon/app_icon_android_padded.png
+    image: assets/icon/app_icon_android.png

@@ -2,16 +2,16 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
-import '../services/storage_service.dart';
+
 import '../services/update_service.dart';
 import '../services/theme_service.dart';
 import 'camera_screen.dart';
 import 'gallery_screen.dart';
 import 'login_screen.dart';
+import 'report_form_screen.dart';
 
 import 'package:open_filex/open_filex.dart';
 
@@ -99,34 +99,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> openCamera() async {
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Checking location permission...'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      // Location MUST be available before camera opens.
-      final position = await locationService.getCurrentLocation();
+      await locationService.getCurrentLocation();
 
       if (!mounted) return;
 
-      // Get area name from GPS coordinates.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Finding current area...'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      final area = await locationService.getAreaName(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      );
-
-      if (!mounted) return;
-
-      // Open camera only after location is successfully obtained.
       final XFile? image = await Navigator.push<XFile>(
         context,
         MaterialPageRoute(builder: (context) => const CameraScreen()),
@@ -134,56 +110,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted || image == null) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Uploading photo...'),
-          behavior: SnackBarBehavior.floating,
+      final submitted = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ReportFormScreen(firstImage: image),
         ),
       );
 
-      // Upload image to Supabase Storage.
-      final imagePath = await StorageService.uploadImage(File(image.path));
-
-      // Create database record.
-      final recordId = const Uuid().v4();
-
-      final timestamp = DateTime.now();
-
-      await StorageService.saveCloudRecord(
-        id: recordId,
-        imagePath: imagePath,
-        latitude: position.latitude,
-        longitude: position.longitude,
-        area: area,
-        timestamp: timestamp,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        capturedImage = image;
-        latitude = position.latitude;
-        longitude = position.longitude;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Photo saved successfully in $area.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (submitted == true && mounted) {
+        // Refresh home/gallery if needed.
+        setState(() {});
+      }
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Unable to capture photo: '
-            '${e.toString().replaceFirst('Exception: ', '')}',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Unable to start report: $e')));
     }
   }
 

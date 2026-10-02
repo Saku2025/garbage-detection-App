@@ -4,13 +4,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'presentation/home_screen.dart';
 import 'presentation/login_screen.dart';
 import 'services/auth_service.dart';
-import 'services/storage_service.dart';
 import 'services/theme_service.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_core/firebase_core.dart';
+
+import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await dotenv.load(fileName: '.env');
 
@@ -18,7 +22,7 @@ Future<void> main() async {
     url: dotenv.env['SUPABASE_URL']!,
     publishableKey: dotenv.env['SUPABASE_PUBLISHABLE_KEY']!,
   );
-  await StorageService.init();
+
   await ThemeService.init();
 
   runApp(const GarbageDetectionApp());

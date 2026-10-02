@@ -25,10 +25,12 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   Future<void> _loadRecords() async {
     try {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+          _errorMessage = null;
+        });
+      }
 
       final cloudRecords = await StorageService.getCloudRecords();
 
@@ -109,6 +111,16 @@ class _GalleryScreenState extends State<GalleryScreen> {
     ];
 
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  int _totalPhotos(List<GarbageRecord> dateRecords) {
+    int total = 0;
+
+    for (final record in dateRecords) {
+      total += record.imagePaths.length;
+    }
+
+    return total;
   }
 
   @override
@@ -197,18 +209,6 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 onPressed: _loadRecords,
                 icon: const Icon(Icons.refresh),
                 label: const Text('Try Again'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colorScheme.primary,
-                  foregroundColor: colorScheme.onPrimary,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 13,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
               ),
             ],
           ),
@@ -242,6 +242,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
         itemBuilder: (context, sectionIndex) {
           final dateKey = dateKeys[sectionIndex];
           final dateRecords = groupedRecords[dateKey]!;
+
+          final totalPhotos = _totalPhotos(dateRecords);
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -281,8 +283,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        '${dateRecords.length} '
-                        '${dateRecords.length == 1 ? 'photo' : 'photos'}',
+                        '$totalPhotos '
+                        '${totalPhotos == 1 ? 'photo' : 'photos'}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -293,18 +295,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
                   ],
                 ),
               ),
-              GridView.builder(
+
+              // ========================================================
+              // ONE CARD FOR ONE GARBAGE REPORT
+              // ========================================================
+              ListView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: dateRecords.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                  childAspectRatio: 0.82,
-                ),
                 itemBuilder: (context, index) {
-                  return _buildPhotoCard(context, dateRecords[index]);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _buildReportCard(context, dateRecords[index]),
+                  );
                 },
               ),
             ],
@@ -386,8 +389,12 @@ class _GalleryScreenState extends State<GalleryScreen> {
     );
   }
 
-  Widget _buildPhotoCard(BuildContext context, GarbageRecord record) {
+  Widget _buildReportCard(BuildContext context, GarbageRecord record) {
     final colorScheme = Theme.of(context).colorScheme;
+
+    if (record.imagePaths.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     final localTime = record.timestamp.toLocal();
 
@@ -396,6 +403,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final minute = localTime.minute.toString().padLeft(2, '0');
 
     final period = localTime.hour >= 12 ? 'PM' : 'AM';
+
+    final photoCount = record.imagePaths.length;
 
     return GestureDetector(
       onTap: () async {
@@ -409,6 +418,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
         await _loadRecords();
       },
       child: Container(
+        width: double.infinity,
         decoration: BoxDecoration(
           color: colorScheme.surface,
           borderRadius: BorderRadius.circular(18),
@@ -425,15 +435,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
           borderRadius: BorderRadius.circular(18),
           child: Column(
             children: [
-              // ==================================================
+              // ======================================================
               // IMAGE
-              // ==================================================
-              Expanded(
+              // ======================================================
+
+              SizedBox(
+                height: 300,
+                width: double.infinity,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
                     Image.network(
-                      record.imagePath,
+                      record.imagePaths.first,
                       width: double.infinity,
                       fit: BoxFit.cover,
                       loadingBuilder: (context, child, loadingProgress) {
@@ -453,26 +466,66 @@ class _GalleryScreenState extends State<GalleryScreen> {
                           color: colorScheme.surfaceContainerHighest,
                           child: Icon(
                             Icons.broken_image_outlined,
-                            size: 45,
+                            size: 50,
                             color: colorScheme.onSurfaceVariant,
                           ),
                         );
                       },
                     ),
 
-                    // Open image icon
+                    // ==================================================
+                    // PHOTO COUNT
+                    // ==================================================
                     Positioned(
-                      top: 9,
-                      right: 9,
+                      top: 12,
+                      left: 12,
                       child: Container(
-                        padding: const EdgeInsets.all(6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 7,
+                        ),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.photo_library_outlined,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$photoCount '
+                              '${photoCount == 1 ? 'photo' : 'photos'}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // ==================================================
+                    // OPEN ICON
+                    // ==================================================
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
                           Icons.open_in_full,
-                          size: 15,
+                          size: 16,
                           color: Colors.white,
                         ),
                       ),
@@ -481,39 +534,36 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 ),
               ),
 
-              // ==================================================
-              // PHOTO INFORMATION
-              // ==================================================
+              // ======================================================
+              // REPORT INFORMATION
+              // ======================================================
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+                padding: const EdgeInsets.fromLTRB(12, 11, 12, 13),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ------------------------------------------------
-                    // AREA
-                    // ------------------------------------------------
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(6),
+                          padding: const EdgeInsets.all(7),
                           decoration: BoxDecoration(
                             color: colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(9),
                           ),
                           child: Icon(
                             Icons.location_city_outlined,
-                            size: 16,
+                            size: 17,
                             color: colorScheme.onPrimaryContainer,
                           ),
                         ),
-                        const SizedBox(width: 7),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             record.area.isEmpty ? 'Unknown Area' : record.area,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                               color: colorScheme.onSurface,
                             ),
@@ -522,54 +572,31 @@ class _GalleryScreenState extends State<GalleryScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
 
-                    // ------------------------------------------------
-                    // COORDINATES
-                    // ------------------------------------------------
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.pin_drop_outlined,
-                          size: 14,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            '${record.latitude.toStringAsFixed(4)}, '
-                            '${record.longitude.toStringAsFixed(4)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w500,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    // ------------------------------------------------
-                    // TIME
-                    // ------------------------------------------------
                     Row(
                       children: [
                         Icon(
                           Icons.access_time_outlined,
-                          size: 14,
+                          size: 16,
                           color: colorScheme.onSurfaceVariant,
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: 6),
                         Text(
                           '$hour:$minute $period',
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: 12,
                             color: colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Tap to view',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
